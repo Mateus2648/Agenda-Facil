@@ -71,4 +71,4 @@ O projeto já está configurado para deploy na Vercel com suporte a rotas SPA.
 Este projeto é privado e destinado ao uso comercial sob licença específica.
 
 ---
-Desenvolvido com ❤️ por [Seu Nome/Empresa]
+Desenvolvido por Mateus Aparecido Ferreira.
