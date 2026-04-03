@@ -1459,18 +1459,20 @@ const PartnerLogin = () => {
 
         {step === 'password' && (
           <form onSubmit={handleLogin} className="space-y-5">
-            <div className="flex items-center gap-3 p-4 bg-zinc-50 border border-zinc-200 rounded-2xl mb-2">
-              <div className="flex-1">
+            <div className="space-y-1 mb-2">
+              <div className="p-4 bg-zinc-50 border border-zinc-200 rounded-2xl">
                 <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">E-mail</p>
-                <p className="text-sm font-medium text-zinc-900">{email}</p>
+                <p className="text-sm font-medium text-zinc-900 truncate">{email}</p>
               </div>
-              <button 
-                type="button"
-                onClick={() => setStep('email')}
-                className="text-[10px] font-bold text-zinc-500 hover:text-zinc-950 uppercase transition-colors"
-              >
-                Alterar
-              </button>
+              <div className="flex justify-end">
+                <button 
+                  type="button"
+                  onClick={() => setStep('email')}
+                  className="text-[10px] font-bold text-zinc-500 hover:text-zinc-950 uppercase tracking-wider transition-colors"
+                >
+                  Alterar
+                </button>
+              </div>
             </div>
             <div className="space-y-2 w-full">
               <label className="text-xs font-bold text-zinc-500 uppercase tracking-wider ml-1">
