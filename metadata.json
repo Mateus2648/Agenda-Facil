@@ -1,0 +1,5 @@
+{
+  "name": "Agenda Fácil",
+  "description": "Sistema SaaS multi-tenant para gestão de estabelecimentos com agendamento online e foco em mobile-first.",
+  "requestFramePermissions": []
+}
