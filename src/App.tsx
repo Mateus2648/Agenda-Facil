@@ -3379,6 +3379,9 @@ const PartnerDashboard = () => {
                       <option value={40}>40 em 40 minutos</option>
                       <option value={45}>45 em 45 minutos</option>
                       <option value={60}>1 em 1 hora</option>
+                      <option value={90}>1 hora e 30 minutos</option>
+                      <option value={120}>2 em 2 horas</option>
+                      <option value={180}>3 em 3 horas</option>
                     </select>
                   </div>
                 </Card>
@@ -3646,7 +3649,25 @@ const PartnerDashboard = () => {
           </div>
           <Input label="Nome" name="name" defaultValue={editingItem?.name} required />
           <Input label="Preço (R$)" name="price" type="number" defaultValue={editingItem?.price} required />
-          <Input label="Duração (min)" name="duration" type="number" defaultValue={editingItem?.duration_minutes} required />
+          <div className="space-y-2 w-full">
+            <label className="text-sm font-bold text-gray-700 ml-1">Duração</label>
+            <select 
+              name="duration" 
+              defaultValue={editingItem?.duration_minutes || 30} 
+              required 
+              className="w-full px-4 py-3 rounded-2xl border border-gray-200 outline-none focus:ring-2 focus:ring-black bg-white text-sm font-medium"
+            >
+              <option value={15}>15 minutos</option>
+              <option value={30}>30 minutos</option>
+              <option value={45}>45 minutos</option>
+              <option value={60}>1 hora</option>
+              <option value={90}>1 hora e 30 minutos</option>
+              <option value={120}>2 horas</option>
+              <option value={150}>2 horas e 30 minutos</option>
+              <option value={180}>3 horas</option>
+              <option value={240}>4 horas</option>
+            </select>
+          </div>
           <Button className="w-full" type="submit">Salvar</Button>
         </form>
       </Modal>
