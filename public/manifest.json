@@ -1,0 +1,17 @@
+{
+  "name": "Agenda Fácil",
+  "short_name": "Agenda Fácil",
+  "description": "Sistema SaaS de agendamentos online mobile-first.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#004E82",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
