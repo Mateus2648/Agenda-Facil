@@ -132,7 +132,16 @@ create table activity_logs (
   created_at timestamp with time zone default now()
 );
 
--- Row Level Security (RLS)
+-- 12. WhatsApp Templates
+create table whatsapp_templates (
+  id uuid primary key default gen_random_uuid(),
+  barbershop_id uuid references barbershops(id) on delete cascade not null,
+  trigger_type text not null,
+  message_template text not null,
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now(),
+  constraint barbershop_trigger_unique unique (barbershop_id, trigger_type)
+);
 alter table barbershops enable row level security;
 alter table profiles enable row level security;
 alter table professionals enable row level security;
@@ -144,6 +153,7 @@ alter table working_hours_overrides enable row level security;
 alter table payments enable row level security;
 alter table activity_logs enable row level security;
 alter table partner_access enable row level security;
+alter table whatsapp_templates enable row level security;
 
 -- Policies
 create policy "Barbershops are viewable by everyone" on barbershops for select using (true);
@@ -151,6 +161,7 @@ create policy "Services are viewable by everyone" on services for select using (
 create policy "Professionals are viewable by everyone" on professionals for select using (true);
 create policy "Working hours are viewable by everyone" on working_hours for select using (true);
 create policy "Working hours overrides are viewable by everyone" on working_hours_overrides for select using (true);
+create policy "WhatsApp templates are viewable by everyone" on whatsapp_templates for select using (true);
 create policy "Activity logs are viewable by Master only" on activity_logs for select using (auth.jwt() ->> 'email' = 'mateusaparecidoferreira@outlook.com' or auth.jwt() ->> 'email' = 'fast01light@gmail.com');
 create policy "Anyone can insert activity logs" on activity_logs for insert with check (true);
 
@@ -196,6 +207,12 @@ create policy "Owners and Master can manage their clients" on clients for all us
   (auth.jwt() ->> 'email' = 'mateusaparecidoferreira@outlook.com' or auth.jwt() ->> 'email' = 'fast01light@gmail.com') or
   exists (select 1 from barbershops where barbershops.id = clients.barbershop_id and (barbershops.owner_id = auth.uid() or barbershops.owner_email = auth.jwt() ->> 'email')) or
   exists (select 1 from partner_access where partner_access.barbershop_id = clients.barbershop_id and (partner_access.user_id = auth.uid() or partner_access.email = auth.jwt() ->> 'email'))
+);
+
+create policy "Owners and Master can manage their whatsapp templates" on whatsapp_templates for all using (
+  (auth.jwt() ->> 'email' = 'mateusaparecidoferreira@outlook.com' or auth.jwt() ->> 'email' = 'fast01light@gmail.com') or
+  exists (select 1 from barbershops where barbershops.id = whatsapp_templates.barbershop_id and (barbershops.owner_id = auth.uid() or barbershops.owner_email = auth.jwt() ->> 'email')) or
+  exists (select 1 from partner_access where partner_access.barbershop_id = whatsapp_templates.barbershop_id and (partner_access.user_id = auth.uid() or partner_access.email = auth.jwt() ->> 'email'))
 );
 
 -- Clients can create appointments
