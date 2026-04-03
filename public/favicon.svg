@@ -1,6 +1,6 @@
 <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
   <!-- Calendar Body -->
-  <rect x="40" x="80" width="432" height="392" rx="40" fill="white" stroke="#004E82" stroke-width="24"/>
+  <rect x="40" y="80" width="432" height="392" rx="40" fill="white" stroke="#004E82" stroke-width="24"/>
   
   <!-- Calendar Header -->
   <path d="M40 120C40 97.9086 57.9086 80 80 80H432C454.091 80 472 97.9086 472 120V180H40V120Z" fill="#66B2FF" stroke="#004E82" stroke-width="24"/>
