@@ -1675,10 +1675,24 @@ const PartnerDashboard = () => {
   // Modals
   const [isServiceModalOpen, setIsServiceModalOpen] = useState(false);
   const [isProfessionalModalOpen, setIsProfessionalModalOpen] = useState(false);
+  
+  // Manual Booking State
+  const [isManualBookingModalOpen, setIsManualBookingModalOpen] = useState(false);
+  const [manualBookingDate, setManualBookingDate] = useState<Date>(new Date());
+  const [manualBookingTime, setManualBookingTime] = useState<string>('');
+  const [manualBookingClientName, setManualBookingClientName] = useState('');
+  const [manualBookingClientPhone, setManualBookingClientPhone] = useState('');
+  const [manualBookingProfessional, setManualBookingProfessional] = useState<any>(null);
+  const [manualBookingServices, setManualBookingServices] = useState<any[]>([]);
+  const [isManualBookingSubmitting, setIsManualBookingSubmitting] = useState(false);
+  const [clientSearchText, setClientSearchText] = useState('');
+  const [showClientSuggestions, setShowClientSuggestions] = useState(false);
+
   const [editingItem, setEditingItem] = useState<any>(null);
   const [modalImageUrl, setModalImageUrl] = useState<string>('');
   const [isIntervalModalOpen, setIsIntervalModalOpen] = useState(false);
   const [editingIntervals, setEditingIntervals] = useState<any[]>([]);
+  const [editingIsActive, setEditingIsActive] = useState(true);
   const [editingDateStr, setEditingDateStr] = useState<string>('');
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [confirmModalConfig, setConfirmModalConfig] = useState<{
@@ -1695,6 +1709,155 @@ const PartnerDashboard = () => {
   const openConfirm = (config: { title: string; message: string; onConfirm: () => void; variant?: 'danger' | 'info' }) => {
     setConfirmModalConfig(config);
     setIsConfirmModalOpen(true);
+  };
+
+  const getPartnerAvailableTimeSlots = (date: Date = manualBookingDate) => {
+    const dayOfWeek = date.getDay();
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const override = workingHoursOverrides.find(o => o.specific_date === dateStr);
+    
+    let config;
+    if (override) {
+      if (!override.is_active) return [];
+      config = override;
+    } else {
+      config = workingHours.find(h => h.day_of_week === dayOfWeek);
+    }
+    
+    if (!config || !config.is_active) return [];
+
+    const slots: string[] = [];
+    const baseDate = new Date(2000, 0, 1);
+
+    const parseTime = (timeStr: string) => {
+      if (!timeStr) return baseDate;
+      const parts = timeStr.split(':');
+      const hours = parseInt(parts[0], 10) || 0;
+      const minutes = parseInt(parts[1], 10) || 0;
+      const d = new Date(baseDate);
+      d.setHours(hours, minutes, 0, 0);
+      return d;
+    };
+
+    const intervals = (config.intervals && Array.isArray(config.intervals) && config.intervals.length > 0)
+      ? config.intervals
+      : [{ start: config.start_time || '09:00', end: config.end_time || '18:00' }];
+
+    intervals.forEach((interval: { start: string, end: string }) => {
+      let current = parseTime(interval.start);
+      const end = parseTime(interval.end);
+
+      if (current >= end) return;
+
+      while (current < end) {
+        const timeStr = format(current, 'HH:mm');
+        if (!slots.includes(timeStr)) slots.push(timeStr);
+        current = addMinutes(current, barbershop?.appointment_interval || 30);
+      }
+    });
+
+    return slots.sort();
+  };
+
+  const isPartnerSlotTaken = (time: string, slotDate: Date = manualBookingDate) => {
+    if (!manualBookingProfessional || manualBookingServices.length === 0) return false;
+
+    const [hours, minutes] = time.split(':').map(Number);
+    const slotStart = setMinutes(setHours(slotDate, hours), minutes);
+    const totalDuration = manualBookingServices.reduce((acc, s) => acc + (s.duration_minutes || 30), 0);
+    const slotEnd = addMinutes(slotStart, totalDuration);
+
+    const filteredAppointments = appointments.filter(a => {
+      if (a.status === 'cancelled' || a.status === 'no_show') return false;
+      if (a.professional_id !== manualBookingProfessional.id) return false;
+      return true;
+    });
+
+    for (const appt of filteredAppointments) {
+      const apptStart = parseISO(appt.start_time);
+      const apptEnd = parseISO(appt.end_time);
+
+      if (
+        (slotStart >= apptStart && slotStart < apptEnd) ||
+        (slotEnd > apptStart && slotEnd <= apptEnd) ||
+        (slotStart <= apptStart && slotEnd >= apptEnd)
+      ) {
+        return true; // Overlaps
+      }
+    }
+
+    return false; // Free
+  };
+
+  const handleManualBookingSubmit = async () => {
+    if (!barbershop || manualBookingServices.length === 0 || !manualBookingProfessional || !manualBookingTime || !manualBookingClientName) {
+      toast.error('Preencha os campos obrigatórios (Cliente, Profissional, Serviço, Horário)');
+      return;
+    }
+
+    setIsManualBookingSubmitting(true);
+    const toastId = toast.loading('Agendando...');
+
+    try {
+      // 1. Create or find client
+      const { data: client, error: clientError } = await supabase
+        .from('clients')
+        .upsert({ 
+          barbershop_id: barbershop.id,
+          name: manualBookingClientName,
+          phone: manualBookingClientPhone || null
+        }, { onConflict: manualBookingClientPhone ? 'phone,barbershop_id' : undefined }) // Se não tiver telefone não usa onConflict por telefone
+        .select()
+        .single();
+
+      if (clientError) throw clientError;
+
+      // 2. Create appointment
+      const [hours, minutes] = manualBookingTime.split(':').map(Number);
+      const startTime = setMinutes(setHours(manualBookingDate, hours), minutes);
+      const totalDuration = manualBookingServices.reduce((acc, s) => acc + (s.duration_minutes || 30), 0);
+      const totalPrice = manualBookingServices.reduce((acc, s) => acc + (s.price || 0), 0);
+      const endTime = addMinutes(startTime, totalDuration);
+
+      const { data: appt, error: apptError } = await supabase
+        .from('appointments')
+        .insert({
+          barbershop_id: barbershop.id,
+          client_id: client.id,
+          professional_id: manualBookingProfessional.id,
+          service_id: manualBookingServices[0].id,
+          services_snapshot: manualBookingServices,
+          start_time: startTime.toISOString(),
+          end_time: endTime.toISOString(),
+          total_price: totalPrice,
+          status: 'scheduled'
+        })
+        .select()
+        .single();
+
+      if (apptError) throw apptError;
+
+      toast.success('Agendamento criado com sucesso!', { id: toastId });
+      
+      setIsManualBookingModalOpen(false);
+      
+      // Reset state
+      setManualBookingClientName('');
+      setManualBookingClientPhone('');
+      setManualBookingServices([]);
+      setManualBookingProfessional(null);
+      setManualBookingTime('');
+      setClientSearchText('');
+      
+      // Refetch
+      fetchBarbershopData(barbershop.id);
+      
+    } catch (error: any) {
+      console.error('Error creating manual booking:', error);
+      toast.error('Erro ao agendar: ' + (error.message || 'Erro desconhecido'), { id: toastId });
+    } finally {
+      setIsManualBookingSubmitting(false);
+    }
   };
 
   // Settings state
@@ -2262,52 +2425,37 @@ const PartnerDashboard = () => {
     }
   };
 
-  const handleSaveDateOverride = async (date: string, field: string, value: any) => {
+  const handleSaveDateOverride = async (date: string, updates: any) => {
     if (!barbershop) return;
     
-    let existing = workingHoursOverrides.find(o => o.specific_date === date);
+    const toastId = toast.loading('Salvando alterações...');
     
-    if (!existing) {
-      const { data: dbOverrides } = await supabase
-        .from('working_hours_overrides')
-        .select('*')
-        .eq('barbershop_id', barbershop.id)
-        .eq('specific_date', date)
-        .limit(1);
-      
-      if (dbOverrides && dbOverrides.length > 0) existing = dbOverrides[0];
-    }
-    
-    const data: any = {
-      barbershop_id: barbershop.id,
-      specific_date: date,
-      start_time: existing ? (field === 'start_time' ? value : (existing.start_time || '09:00')) : (field === 'start_time' ? value : '09:00'),
-      end_time: existing ? (field === 'end_time' ? value : (existing.end_time || '18:00')) : (field === 'end_time' ? value : '18:00'),
-      intervals: existing ? (field === 'intervals' ? value : (existing.intervals || [])) : (field === 'intervals' ? value : []),
-      is_active: existing ? (field === 'is_active' ? value : existing.is_active) : (field === 'is_active' ? value : true)
-    };
-
     try {
-      let error;
-      if (existing?.id) {
-        const { error: updateError } = await supabase
-          .from('working_hours_overrides')
-          .update(data)
-          .eq('id', existing.id);
-        error = updateError;
-      } else {
-        const { error: upsertError } = await supabase
-          .from('working_hours_overrides')
-          .upsert(data, { onConflict: 'barbershop_id,specific_date' });
-        error = upsertError;
-      }
+      // Busca se já existe localmente para preservar campos
+      const existing = workingHoursOverrides.find(o => o.specific_date === date);
+      
+      const data: any = {
+        barbershop_id: barbershop.id,
+        specific_date: date,
+        start_time: updates.start_time !== undefined ? updates.start_time : (existing?.start_time || '09:00'),
+        end_time: updates.end_time !== undefined ? updates.end_time : (existing?.end_time || '18:00'),
+        intervals: updates.intervals !== undefined ? updates.intervals : (existing?.intervals || []),
+        is_active: updates.is_active !== undefined ? updates.is_active : (existing?.is_active ?? true)
+      };
+
+      // Sempre usa upsert com onConflict para evitar erros de duplicidade e simplificar a lógica
+      const { error } = await supabase
+        .from('working_hours_overrides')
+        .upsert(data, { onConflict: 'barbershop_id,specific_date' });
       
       if (error) throw error;
-      toast.success('Exceção salva com sucesso!');
+      
+      toast.success('Alterações salvas com sucesso!', { id: toastId });
+      setIsIntervalModalOpen(false);
       fetchBarbershopData(barbershop.id);
     } catch (error: any) {
       console.error('Erro ao salvar exceção:', error);
-      toast.error('Erro ao salvar exceção: ' + error.message);
+      toast.error('Erro ao salvar exceção: ' + (error.message || 'Erro desconhecido'), { id: toastId });
     }
   };
 
@@ -2417,6 +2565,7 @@ const PartnerDashboard = () => {
                         }
                         
                         setEditingIntervals(isActive ? intervals : [{ start: '09:00', end: '18:00' }]);
+                        setEditingIsActive(isActive);
                         setEditingDateStr(dateStr);
                         setIsIntervalModalOpen(true);
                       }}
@@ -2664,6 +2813,12 @@ const PartnerDashboard = () => {
                   Gerencie agendamentos
                 </p>
               </div>
+              <Button 
+                onClick={() => setIsManualBookingModalOpen(true)}
+                className="bg-black text-white hover:bg-gray-800 flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-transform active:scale-95"
+              >
+                <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Novo Agendamento
+              </Button>
             </div>
             
             {/* Seletor de Status */}
@@ -3715,46 +3870,67 @@ const PartnerDashboard = () => {
         title="Editar Intervalos"
       >
         <div className="space-y-4">
-          {editingIntervals.map((interval, index) => (
-            <div key={index} className="flex gap-2 items-center">
-              <Input 
-                type="time" 
-                value={interval.start} 
-                onChange={(e: any) => {
-                  const newIntervals = [...editingIntervals];
-                  newIntervals[index].start = e.target.value;
-                  setEditingIntervals(newIntervals);
-                }} 
-              />
-              <Input 
-                type="time" 
-                value={interval.end} 
-                onChange={(e: any) => {
-                  const newIntervals = [...editingIntervals];
-                  newIntervals[index].end = e.target.value;
-                  setEditingIntervals(newIntervals);
-                }} 
-              />
-              <button 
-                onClick={() => {
-                  const newIntervals = editingIntervals.filter((_, i) => i !== index);
-                  setEditingIntervals(newIntervals);
-                }}
-                className="p-2 text-red-500 hover:bg-red-50 rounded-full"
-              >
-                <X className="w-4 h-4" />
-              </button>
+          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
+            <div className="flex items-center gap-3">
+              <div className={`w-2 h-2 rounded-full ${editingIsActive ? 'bg-green-500' : 'bg-red-500'}`} />
+              <span className="font-bold text-sm">{editingIsActive ? 'Dia Ativo' : 'Dia Bloqueado'}</span>
             </div>
-          ))}
-          <button 
-            onClick={() => setEditingIntervals([...editingIntervals, { start: '09:00', end: '18:00' }])}
-            className="w-full py-2 border-2 border-dashed border-gray-200 rounded-xl font-bold text-gray-400 hover:border-black hover:text-black transition-all"
-          >
-            + Adicionar Intervalo
-          </button>
+            <button
+              onClick={() => setEditingIsActive(!editingIsActive)}
+              className={`w-10 h-5 rounded-full transition-colors relative ${editingIsActive ? 'bg-black' : 'bg-gray-300'}`}
+            >
+              <div className={`absolute top-1 w-3 h-3 bg-white rounded-full shadow-sm transition-all ${editingIsActive ? 'right-1' : 'left-1'}`} />
+            </button>
+          </div>
+
+          {editingIsActive && (
+            <>
+              {editingIntervals.map((interval, index) => (
+                <div key={index} className="flex gap-2 items-center">
+                  <Input 
+                    type="time" 
+                    value={interval.start} 
+                    onChange={(e: any) => {
+                      const newIntervals = [...editingIntervals];
+                      newIntervals[index] = { ...newIntervals[index], start: e.target.value };
+                      setEditingIntervals(newIntervals);
+                    }} 
+                  />
+                  <Input 
+                    type="time" 
+                    value={interval.end} 
+                    onChange={(e: any) => {
+                      const newIntervals = [...editingIntervals];
+                      newIntervals[index] = { ...newIntervals[index], end: e.target.value };
+                      setEditingIntervals(newIntervals);
+                    }} 
+                  />
+                  <button 
+                    onClick={() => {
+                      const newIntervals = editingIntervals.filter((_, i) => i !== index);
+                      setEditingIntervals(newIntervals);
+                    }}
+                    className="p-2 text-red-500 hover:bg-red-50 rounded-full"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              <button 
+                onClick={() => setEditingIntervals([...editingIntervals, { start: '09:00', end: '18:00' }])}
+                className="w-full py-2 border-2 border-dashed border-gray-200 rounded-xl font-bold text-gray-400 hover:border-black hover:text-black transition-all"
+              >
+                + Adicionar Intervalo
+              </button>
+            </>
+          )}
+
           <Button 
             onClick={() => {
-              handleSaveDateOverride(editingDateStr, 'intervals', editingIntervals);
+              handleSaveDateOverride(editingDateStr, { 
+                intervals: editingIntervals,
+                is_active: editingIsActive
+              });
               setIsIntervalModalOpen(false);
             }}
             className="w-full"
@@ -4295,6 +4471,152 @@ const PartnerDashboard = () => {
             </div>
           );
         })()}
+      </Modal>
+
+      <Modal 
+        isOpen={isManualBookingModalOpen} 
+        onClose={() => setIsManualBookingModalOpen(false)} 
+        title="Novo Agendamento (Livre)"
+      >
+        <div className="space-y-6">
+          <div className="space-y-4">
+            <h3 className="font-bold text-sm">Dados do Cliente</h3>
+            <div className="relative">
+              <label className="text-[10px] uppercase font-bold text-gray-500">Nome</label>
+              <input 
+                type="text" 
+                value={manualBookingClientName}
+                onChange={(e) => {
+                  setManualBookingClientName(e.target.value);
+                  setShowClientSuggestions(true);
+                }}
+                onFocus={() => setShowClientSuggestions(true)}
+                className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-black"
+                placeholder="Nome do cliente"
+              />
+              {showClientSuggestions && manualBookingClientName.length > 2 && (
+                <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 shadow-xl rounded-xl max-h-48 overflow-y-auto">
+                  {clients
+                    .filter(c => c.name?.toLowerCase().includes(manualBookingClientName.toLowerCase()) || c.phone?.includes(manualBookingClientName))
+                    .map(c => (
+                    <div 
+                      key={c.id} 
+                      className="p-3 hover:bg-gray-50 cursor-pointer text-sm border-b last:border-0 border-gray-100 flex justify-between items-center"
+                      onClick={() => {
+                        setManualBookingClientName(c.name);
+                        setManualBookingClientPhone(c.phone || '');
+                        setShowClientSuggestions(false);
+                      }}
+                    >
+                      <div>
+                        <span className="font-bold block">{c.name}</span>
+                        <span className="text-gray-500 text-xs">{c.phone || 'Sem número'}</span>
+                      </div>
+                      <Plus className="w-4 h-4 text-gray-300" />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="text-[10px] uppercase font-bold text-gray-500">WhatsApp (Opcional)</label>
+              <input 
+                type="text" 
+                value={manualBookingClientPhone}
+                onChange={(e) => setManualBookingClientPhone(e.target.value)}
+                className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-black"
+                placeholder="(00) 00000-0000"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <h3 className="font-bold text-sm">Serviços</h3>
+            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+              {services.map(s => {
+                const isSelected = manualBookingServices.some(ms => ms.id === s.id);
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => {
+                      if (isSelected) setManualBookingServices(manualBookingServices.filter(ms => ms.id !== s.id));
+                      else setManualBookingServices([...manualBookingServices, s]);
+                    }}
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${isSelected ? 'bg-black text-white border-black' : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-gray-400'}`}
+                  >
+                    {s.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <h3 className="font-bold text-sm">Profissional</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {professionals.map(p => {
+                const isSelected = manualBookingProfessional?.id === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => setManualBookingProfessional(p)}
+                    className={`p-2 hover:bg-gray-50 rounded-xl text-xs font-bold border transition-all text-left flex items-center gap-2 ${isSelected ? 'bg-black text-white border-black' : 'bg-gray-50 text-gray-600 border-gray-200'}`}
+                  >
+                    <div className="w-8 h-8 rounded-full bg-gray-200 overflow-hidden shrink-0">
+                      {p.avatar_url && <img src={p.avatar_url} className="w-full h-full object-cover" />}
+                    </div>
+                    <span className="truncate">{p.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {manualBookingProfessional && manualBookingServices.length > 0 && (
+            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <h3 className="font-bold text-sm">Horário (Livres e Ocupados)</h3>
+              <input 
+                type="date"
+                value={format(manualBookingDate, 'yyyy-MM-dd')}
+                onChange={(e) => setManualBookingDate(new Date(e.target.value + 'T12:00:00'))}
+                className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm mb-4 font-bold outline-none focus:ring-2 focus:ring-black"
+              />
+              
+              <div className="grid grid-cols-4 sm:grid-cols-5 gap-2 max-h-48 overflow-y-auto pr-2">
+                {getPartnerAvailableTimeSlots().map(time => {
+                  const taken = isPartnerSlotTaken(time);
+                  const isSelected = manualBookingTime === time;
+                  return (
+                    <button
+                      key={time}
+                      onClick={() => setManualBookingTime(time)}
+                      className={`py-2 rounded-xl text-xs font-bold border transition-all ${
+                        isSelected 
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-md transform scale-105' 
+                          : taken 
+                            ? 'bg-red-50 text-red-600 border-red-200 opacity-60 hover:opacity-100 hover:border-red-400' 
+                            : 'bg-white text-gray-700 border-gray-200 hover:border-black'
+                      }`}
+                    >
+                      {time}
+                      {taken && <span className="block text-[8px] uppercase tracking-wider mt-0.5">Ocupado</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="pt-4 mt-4 border-t border-gray-100">
+            <Button 
+              className="w-full h-12 text-lg" 
+              onClick={handleManualBookingSubmit}
+              disabled={isManualBookingSubmitting || !manualBookingClientName || manualBookingServices.length === 0 || !manualBookingProfessional || !manualBookingTime}
+            >
+              {isManualBookingSubmitting ? 'Agendando...' : 'Confirmar Agendamento Livre'}
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       <ConfirmModal
