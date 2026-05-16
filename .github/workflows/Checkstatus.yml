@@ -1,0 +1,8 @@
+- name: Check status
+  run: |
+    STATUS=$(curl -o /dev/null -s -w "%{http_code}" https://knmoluaxgnopqiatxbdr.supabase.co/auth/v1/health)
+
+    if [ "$STATUS" != "200" ]; then
+      echo "Supabase offline"
+      exit 1
+    fi
