@@ -1,0 +1,14 @@
+name: Keep Supabase Awake
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Ping Supabase
+        run: |
+          curl -I https://knmoluaxgnopqiatxbdr.supabase.co/auth/v1/health
