@@ -12,14 +12,12 @@ jobs:
     steps:
       - name: Ping Supabase Health Endpoint
         run: |
-          STATUS=$(curl -L -s -o /dev/null -w "%{http_code}" \
-          curl -I https://knmoluaxgnopqiatxbdr.supabase.co/auth/v1/health
+          STATUS=$(curl -L -s -o /dev/null -w "%{http_code}" "https://knmoluaxgnopqiatxbdr.supabase.co/auth/v1/health")
 
           echo "HTTP Status: $STATUS"
 
-          if [ "$STATUS" -eq 200 ] || [ "$STATUS" -eq 401 ]; then
+          if [ "$STATUS" = "200" ] || [ "$STATUS" = "401" ]; then
             echo "Supabase is awake."
-            exit 0
           else
             echo "Unexpected status: $STATUS"
             exit 1
