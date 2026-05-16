@@ -3,13 +3,24 @@ name: Keep Supabase Awake
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/10 * * * *'
 
 jobs:
-  ping:
+  keepalive:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Ping Supabase
+      - name: Ping Supabase Health Endpoint
         run: |
+          STATUS=$(curl -L -s -o /dev/null -w "%{http_code}" \
           curl -I https://knmoluaxgnopqiatxbdr.supabase.co/auth/v1/health
+
+          echo "HTTP Status: $STATUS"
+
+          if [ "$STATUS" -eq 200 ] || [ "$STATUS" -eq 401 ]; then
+            echo "Supabase is awake."
+            exit 0
+          else
+            echo "Unexpected status: $STATUS"
+            exit 1
+          fi
